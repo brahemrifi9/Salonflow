@@ -1,0 +1,428 @@
+from datetime import datetime, timezone, timedelta, time, date as date_type
+from typing import List
+
+from zoneinfo import ZoneInfo
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app import models
+
+from app.schemas.bookings import (
+    BookingCreate,
+    BookingResponse,
+    BookingOut,
+    AvailabilityOut,
+    AvailabilitySlot,
+)
+from app.schemas.public import (
+    PublicBookingCreate,
+    PublicBookingConfirmation,
+    PublicBookingLookup,
+    PublicBookingCancelRequest,
+)
+
+from app.auth import get_current_user
+from app.core.deps import require_admin
+from app.domain.booking_rules import validate_and_compute_end_time_utc
+from app.utils.booking_ref import generate_booking_ref
+
+# Rate limiting (SlowAPI)
+from app.core.rate_limit import limiter
+
+router = APIRouter(prefix="/api/v1", tags=["Bookings"])
+
+MADRID = ZoneInfo("Europe/Madrid")
+UTC = ZoneInfo("UTC")
+
+
+# ----------------------
+# Create Booking (Authenticated user required)
+# ----------------------
+@router.post(
+    "/bookings/",
+    status_code=status.HTTP_201_CREATED,
+    response_model=BookingResponse,
+)
+def create_booking(
+    booking: BookingCreate,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    cliente = db.query(models.Cliente).filter(models.Cliente.id == booking.cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+
+    barber = db.query(models.Barber).filter(models.Barber.id == booking.barber_id).first()
+    if not barber or not barber.is_active:
+        raise HTTPException(status_code=404, detail="Barbero no encontrado o inactivo.")
+
+    service = db.query(models.Service).filter(models.Service.id == booking.service_id).first()
+    if not service or not service.is_active:
+        raise HTTPException(status_code=404, detail="Servicio no encontrado o inactivo.")
+
+    duration_minutes = service.duration_minutes
+
+    start_utc, end_utc = validate_and_compute_end_time_utc(
+        booking.start_time,
+        duration_minutes,
+        require_client_utc=True,
+        enforce_slot_step=True,
+    )
+
+    new_booking = models.Booking(
+        booking_ref=generate_booking_ref(),
+        cliente_id=booking.cliente_id,
+        barber_id=booking.barber_id,
+        service_id=booking.service_id,
+        start_time=start_utc,
+        end_time=end_utc,
+        duration_minutes=duration_minutes,
+    )
+
+    db.add(new_booking)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Este horario ya no está disponible.")
+
+    db.refresh(new_booking)
+    return new_booking
+
+
+# ----------------------
+# Create Booking (PUBLIC) - telefono + auto-create Cliente
+# POST /api/v1/public/bookings
+# ----------------------
+@router.post(
+    "/public/bookings",
+    status_code=status.HTTP_201_CREATED,
+    response_model=PublicBookingConfirmation,
+)
+@limiter.limit("5/minute")
+def create_public_booking(
+    request: Request,
+    booking: PublicBookingCreate,
+    db: Session = Depends(get_db),
+):
+    cliente = db.query(models.Cliente).filter(models.Cliente.telefono == booking.telefono).first()
+
+    if cliente is None:
+        if not booking.nombre or not booking.nombre.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="El campo 'nombre' es obligatorio si el cliente no existe.",
+            )
+
+        cliente = models.Cliente(
+            nombre=booking.nombre.strip(),
+            telefono=booking.telefono.strip(),
+        )
+        db.add(cliente)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            cliente = db.query(models.Cliente).filter(models.Cliente.telefono == booking.telefono).first()
+            if cliente is None:
+                raise HTTPException(status_code=409, detail="No se pudo crear el cliente.")
+        else:
+            db.refresh(cliente)
+
+    barber = db.query(models.Barber).filter(models.Barber.id == booking.barber_id).first()
+    if not barber or not barber.is_active:
+        raise HTTPException(status_code=404, detail="Barbero no encontrado o inactivo.")
+
+    service = db.query(models.Service).filter(models.Service.id == booking.service_id).first()
+    if not service or not service.is_active:
+        raise HTTPException(status_code=404, detail="Servicio no encontrado o inactivo.")
+
+    duration_minutes = service.duration_minutes
+
+    start_utc, end_utc = validate_and_compute_end_time_utc(
+        booking.start_time,
+        duration_minutes,
+        require_client_utc=True,
+        enforce_slot_step=True,
+    )
+
+    new_booking = models.Booking(
+        booking_ref=generate_booking_ref(),
+        cliente_id=cliente.id,
+        barber_id=barber.id,
+        service_id=service.id,
+        start_time=start_utc,
+        end_time=end_utc,
+        duration_minutes=duration_minutes,
+    )
+    db.add(new_booking)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Este horario ya no está disponible.")
+
+    db.refresh(new_booking)
+
+    return PublicBookingConfirmation(
+        booking_id=new_booking.id,
+        booking_ref=new_booking.booking_ref,
+        start_time=new_booking.start_time,
+        end_time=new_booking.end_time,
+        barber={
+            "id": barber.id,
+            "name": getattr(barber, "nombre", None) or getattr(barber, "name", ""),
+        },
+        service={
+            "id": service.id,
+            "name": getattr(service, "nombre", None) or getattr(service, "name", ""),
+            "duration_minutes": getattr(service, "duration_minutes", None)
+            if getattr(service, "duration_minutes", None) is not None
+            else getattr(service, "duration_min", None) or duration_minutes,
+            "price_cents": getattr(service, "price_cents", None),
+        },
+        cliente_nombre=getattr(cliente, "nombre", None),
+        cliente_telefono=getattr(cliente, "telefono", booking.telefono),
+        message="Reserva confirmada.",
+    )
+
+
+# ----------------------
+# Public Availability (slots) WITH MADRID + UTC
+# GET /api/v1/public/availability?barber_id=1&service_id=2&date=2026-03-10
+# ----------------------
+
+
+@router.get(
+    "/public/bookings/{booking_ref}",
+    response_model=PublicBookingLookup,
+)
+def get_public_booking(
+    booking_ref: str,
+    db: Session = Depends(get_db),
+):
+    booking = (
+        db.query(models.Booking)
+        .filter(models.Booking.booking_ref == booking_ref)
+        .first()
+    )
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="Reserva no encontrada.")
+
+    barber = booking.barber
+    service = booking.service
+    cliente = booking.cliente
+
+    status_value = "cancelled" if booking.cancelled_at else "confirmed"
+
+    return PublicBookingLookup(
+        booking_ref=booking.booking_ref,
+        start_time=booking.start_time,
+        end_time=booking.end_time,
+        cancelled_at=booking.cancelled_at,
+        barber={
+            "id": barber.id,
+            "name": getattr(barber, "nombre", None) or getattr(barber, "name", ""),
+        },
+        service={
+            "id": service.id,
+            "name": getattr(service, "nombre", None) or getattr(service, "name", ""),
+            "duration_minutes": getattr(service, "duration_minutes", None)
+            if getattr(service, "duration_minutes", None) is not None
+            else getattr(service, "duration_min", None),
+            "price_cents": getattr(service, "price_cents", None),
+        },
+        cliente_nombre=getattr(cliente, "nombre", None),
+        cliente_telefono=getattr(cliente, "telefono", ""),
+        status=status_value,
+    )
+
+
+@router.patch(
+    "/public/bookings/{booking_ref}/cancel",
+)
+def cancel_public_booking(
+    booking_ref: str,
+    payload: PublicBookingCancelRequest,
+    db: Session = Depends(get_db),
+):
+    booking = (
+        db.query(models.Booking)
+        .filter(models.Booking.booking_ref == booking_ref)
+        .first()
+    )
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="Reserva no encontrada.")
+
+    cliente = booking.cliente
+
+    # telefono verification
+    if cliente.telefono != payload.telefono:
+        raise HTTPException(status_code=403, detail="Teléfono incorrecto.")
+
+    if booking.cancelled_at is not None:
+        raise HTTPException(status_code=409, detail="La reserva ya está cancelada.")
+
+    booking.cancelled_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(booking)
+
+    return {
+        "booking_ref": booking.booking_ref,
+        "status": "cancelled",
+        "message": "Reserva cancelada correctamente.",
+    }
+
+
+@router.get(
+    "/public/availability",
+    response_model=AvailabilityOut,
+)
+def get_public_availability(
+    barber_id: int = Query(..., ge=1),
+    service_id: int = Query(..., ge=1),
+    date: date_type = Query(...),
+    db: Session = Depends(get_db),
+):
+    barber = db.query(models.Barber).filter(models.Barber.id == barber_id).first()
+    if not barber or not getattr(barber, "is_active", True):
+        raise HTTPException(status_code=404, detail="Barbero no encontrado o inactivo.")
+
+    service = db.query(models.Service).filter(models.Service.id == service_id).first()
+    if not service or not getattr(service, "is_active", True):
+        raise HTTPException(status_code=404, detail="Servicio no encontrado o inactivo.")
+
+    duration_minutes = getattr(service, "duration_minutes", None) or getattr(service, "duration_min", None)
+    if not duration_minutes:
+        raise HTTPException(status_code=500, detail="Servicio sin duración configurada.")
+
+    duration = timedelta(minutes=int(duration_minutes))
+    step = timedelta(minutes=15)
+
+    # Madrid day range -> UTC query window
+    day_start_madrid = datetime.combine(date, time(0, 0), tzinfo=MADRID)
+    day_end_madrid = day_start_madrid + timedelta(days=1)
+
+    day_start_utc = day_start_madrid.astimezone(UTC)
+    day_end_utc = day_end_madrid.astimezone(UTC)
+
+    existing = (
+        db.query(models.Booking)
+        .filter(models.Booking.barber_id == barber_id)
+        .filter(models.Booking.cancelled_at.is_(None))
+        .filter(models.Booking.start_time < day_end_utc)
+        .filter(models.Booking.end_time > day_start_utc)
+        .all()
+    )
+
+    busy: list[tuple[datetime, datetime]] = []
+    for b in existing:
+        s = b.start_time
+        e = b.end_time
+        if s.tzinfo is None:
+            s = s.replace(tzinfo=timezone.utc)
+        if e.tzinfo is None:
+            e = e.replace(tzinfo=timezone.utc)
+        busy.append((s.astimezone(UTC), e.astimezone(UTC)))
+
+    open_madrid = datetime.combine(date, time(11, 0), tzinfo=MADRID)
+    close_madrid = datetime.combine(date, time(21, 30), tzinfo=MADRID)
+
+    lunch_start = datetime.combine(date, time(15, 0), tzinfo=MADRID)
+    lunch_end = datetime.combine(date, time(16, 0), tzinfo=MADRID)
+
+    last_start = close_madrid - duration
+    if last_start < open_madrid:
+        return AvailabilityOut(barber_id=barber_id, service_id=service_id, date=date, slots=[])
+
+    slots: list[AvailabilitySlot] = []
+    t = open_madrid
+
+    while t <= last_start:
+        start_m = t
+        end_m = t + duration
+
+        if (start_m < lunch_end) and (end_m > lunch_start):
+            t += step
+            continue
+
+        start_u = start_m.astimezone(UTC)
+        end_u = end_m.astimezone(UTC)
+
+        conflict = any((start_u < be) and (end_u > bs) for (bs, be) in busy)
+        if conflict:
+            t += step
+            continue
+
+        start_madrid = start_u.astimezone(MADRID)
+        end_madrid = end_u.astimezone(MADRID)
+
+        slots.append(
+            AvailabilitySlot(
+                start_time_utc=start_u,
+                end_time_utc=end_u,
+                start_time_madrid=start_madrid,
+                end_time_madrid=end_madrid,
+            )
+        )
+
+        t += step
+
+    return AvailabilityOut(
+        barber_id=barber_id,
+        service_id=service_id,
+        date=date,
+        slots=slots,
+    )
+
+
+# ----------------------
+# List Bookings (ADMIN ONLY)
+# ----------------------
+@router.get(
+    "/bookings/",
+    response_model=List[BookingResponse],
+    dependencies=[Depends(require_admin)],
+)
+def list_bookings(db: Session = Depends(get_db)):
+    return db.query(models.Booking).order_by(models.Booking.start_time.asc()).all()
+
+
+# ----------------------
+# Cancel Booking (ADMIN ONLY)
+# ----------------------
+@router.patch(
+    "/bookings/{booking_id}/cancel",
+    response_model=BookingOut,
+    dependencies=[Depends(require_admin)],
+)
+def cancel_booking(booking_id: int, db: Session = Depends(get_db)):
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="Reserva no encontrada.")
+
+    if booking.cancelled_at is not None:
+        raise HTTPException(status_code=409, detail="La reserva ya está cancelada.")
+
+    booking.cancelled_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+# ----------------------
+# Admin Dedicated Endpoint
+# ----------------------
+@router.get(
+    "/admin/bookings",
+    dependencies=[Depends(require_admin)],
+)
+def admin_list_bookings(db: Session = Depends(get_db)):
+    return db.query(models.Booking).order_by(models.Booking.start_time.asc()).all()
