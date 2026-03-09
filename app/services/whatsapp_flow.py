@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from pyexpat.errors import messages
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
@@ -8,10 +7,12 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.domain.booking_rules import validate_and_compute_end_time_utc
-from app.services.meta_whatsapp import send_text_message
 from app.utils.booking_ref import generate_booking_ref
-from app.services.meta_whatsapp import send_whatsapp_buttons
-
+from app.services.meta_whatsapp import (
+    send_text_message,
+    send_whatsapp_buttons,
+    send_whatsapp_list,
+)
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
@@ -145,6 +146,25 @@ def build_services_menu(services: list[models.Service]) -> tuple[str, dict]:
     lines.append("")
     lines.append("Responde con el número del servicio.")
     return "\n".join(lines), option_map
+
+
+def build_services_list(services: list[models.Service]) -> list[dict]:
+    items = []
+
+    for service in services:
+        description = f"{service.duration_minutes} min"
+        if service.price_cents is not None:
+            description += f" · €{service.price_cents / 100:.2f}"
+
+        items.append(
+            {
+                "id": f"SERVICE_{service.id}",
+                "title": service.name[:24],
+                "description": description[:72],
+            }
+        )
+
+    return items
 
 
 def build_barbers_menu(barbers: list[models.Barber]) -> tuple[str, dict]:
@@ -282,44 +302,63 @@ def process_menu_selection(db: Session, session: models.WhatsappSession, incomin
             reset_to_menu(session)
             return "No hay servicios disponibles ahora mismo."
 
-        message, option_map = build_services_menu(services)
         session.state = "BOOKING_SERVICE"
-        session.set_data({"service_options": option_map})
-        return message
-
-    if text in ["2", "view"]:
-        session.state = "LOOKUP_REF"
         session.set_data({})
-        return "Escribe tu código de reserva. Ejemplo: SF-ABCDE"
+        return "__SEND_SERVICE_LIST__"
+
+    
+    if text in ["2", "view"]:
+        bookings = get_active_bookings_for_phone(db, session.telefono)
+        if not bookings:
+            reset_to_menu(session)
+            return "No tienes reservas activas en este número."
+
+        session.state = "LOOKUP_SELECT"
+        session.set_data({})
+        return "__SEND_VIEW_BOOKINGS_LIST__"
 
     if text in ["3", "cancel"]:
-        session.state = "CANCEL_REF"
+        bookings = get_active_bookings_for_phone(db, session.telefono)
+        if not bookings:
+            reset_to_menu(session)
+            return "No tienes reservas activas para cancelar."
+
+        session.state = "CANCEL_SELECT"
         session.set_data({})
-        return "Escribe tu código de reserva para cancelarla. Ejemplo: SF-ABCDE"
+        return "__SEND_CANCEL_BOOKINGS_LIST__"
 
     return MENU_TEXT
 
 
-def process_lookup_flow(db: Session, session: models.WhatsappSession, incoming_text: str) -> str:
-    booking_ref = incoming_text.strip().upper()
+def process_lookup_select_flow(db: Session, session: models.WhatsappSession, incoming_text: str) -> str:
+    text = incoming_text.strip()
+
+    booking_id = None
+    if text.startswith("VIEWBOOKING_"):
+        raw_id = text.replace("VIEWBOOKING_", "", 1)
+        if raw_id.isdigit():
+            booking_id = int(raw_id)
+
+    if not booking_id:
+        return "Selección no válida. Abre la lista y elige una reserva."
+
     telefono = normalize_phone(session.telefono)
 
     booking = (
         db.query(models.Booking)
         .join(models.Cliente)
         .filter(
-            models.Booking.booking_ref == booking_ref,
+            models.Booking.id == booking_id,
             models.Cliente.telefono == telefono,
         )
         .first()
     )
 
     if not booking:
-        return (
-            "No he encontrado una reserva con ese código asociada a este número de WhatsApp.\n"
-            "Revisa el código o escribe menú."
-        )
+        reset_to_menu(session)
+        return "No he encontrado esa reserva en este número."
 
+    reset_to_menu(session)
     return format_booking_details(booking)
 
 
@@ -358,11 +397,17 @@ def process_booking_flow(db: Session, session: models.WhatsappSession, incoming_
     text = incoming_text.strip()
 
     if session.state == "BOOKING_SERVICE":
-        service_options = data.get("service_options", {})
-        service_id = service_options.get(text)
+        service_id = None
+
+        if text.startswith("SERVICE_"):
+            raw_id = text.replace("SERVICE_", "", 1)
+            if raw_id.isdigit():
+                service_id = int(raw_id)
+        elif text.isdigit():
+            service_id = int(text)
 
         if not service_id:
-            return "Servicio no válido. Responde con uno de los números mostrados."
+            return "Servicio no válido. Abre la lista y elige un servicio."
 
         service = db.query(models.Service).filter(models.Service.id == service_id).first()
         if not service or not service.is_active:
@@ -377,7 +422,6 @@ def process_booking_flow(db: Session, session: models.WhatsappSession, incoming_
 
         data["service_id"] = service.id
         data["service_name"] = service.name
-        data["service_options"] = service_options
         data["barber_options"] = barber_options
         session.set_data(data)
         session.state = "BOOKING_BARBER"
@@ -481,6 +525,163 @@ def process_booking_flow(db: Session, session: models.WhatsappSession, incoming_
     return MENU_TEXT
 
 
+def get_active_bookings_for_phone(
+    db: Session,
+    telefono: str,
+    limit: int = 10,
+) -> list[models.Booking]:
+    telefono = normalize_phone(telefono)
+
+    return (
+        db.query(models.Booking)
+        .join(models.Cliente)
+        .filter(
+            models.Cliente.telefono == telefono,
+            models.Booking.cancelled_at.is_(None),
+        )
+        .order_by(models.Booking.start_time.asc())
+        .limit(limit)
+        .all()
+    )
+
+
+def format_booking_row_title(booking: models.Booking) -> str:
+    start_madrid = booking.start_time.astimezone(MADRID_TZ)
+    return f"{booking.service.name} · {start_madrid.strftime('%d/%m %H:%M')}"[:24]
+
+
+SPANISH_DAYS = {
+    0: "Lunes",
+    1: "Martes",
+    2: "Miércoles",
+    3: "Jueves",
+    4: "Viernes",
+    5: "Sábado",
+    6: "Domingo",
+}
+
+def format_booking_row_description(booking: models.Booking) -> str:
+    start_madrid = booking.start_time.astimezone(MADRID_TZ)
+
+    day = SPANISH_DAYS[start_madrid.weekday()]
+    time = start_madrid.strftime("%H:%M")
+
+    return f"{booking.barber.name} · {day} {time}"[:72]
+
+
+def build_bookings_list_items(bookings: list[models.Booking], prefix: str) -> list[dict]:
+    items = []
+    for booking in bookings:
+        items.append(
+            {
+                "id": f"{prefix}_{booking.id}",
+                "title": format_booking_row_title(booking),
+                "description": format_booking_row_description(booking),
+            }
+        )
+    return items
+
+
+def format_human_booking_datetime(dt: datetime) -> str:
+    madrid_dt = dt.astimezone(MADRID_TZ)
+    now_madrid = datetime.now(MADRID_TZ).date()
+    target_date = madrid_dt.date()
+
+    if target_date == now_madrid:
+        day_label = "Hoy"
+    elif target_date == now_madrid.fromordinal(now_madrid.toordinal() + 1):
+        day_label = "Mañana"
+    else:
+        day_label = madrid_dt.strftime("%d/%m/%Y")
+
+    return f"{day_label} a las {madrid_dt.strftime('%H:%M')}"
+
+
+def process_cancel_select_flow(db: Session, session: models.WhatsappSession, incoming_text: str) -> str:
+    data = session.get_data()
+    text = incoming_text.strip()
+
+    if session.state == "CANCEL_SELECT":
+        booking_id = None
+        if text.startswith("CANCELBOOKING_"):
+            raw_id = text.replace("CANCELBOOKING_", "", 1)
+            if raw_id.isdigit():
+                booking_id = int(raw_id)
+
+        if not booking_id:
+            return "Selección no válida. Abre la lista y elige una reserva."
+
+        telefono = normalize_phone(session.telefono)
+        booking = (
+            db.query(models.Booking)
+            .join(models.Cliente)
+            .filter(
+                models.Booking.id == booking_id,
+                models.Cliente.telefono == telefono,
+                models.Booking.cancelled_at.is_(None),
+            )
+            .first()
+        )
+
+        if not booking:
+            reset_to_menu(session)
+            return "No he encontrado esa reserva activa en este número."
+
+        data["cancel_booking_id"] = booking.id
+        session.set_data(data)
+        session.state = "CANCEL_CONFIRM"
+
+        start_text = format_human_booking_datetime(booking.start_time)
+
+        return (
+            "¿Seguro que quieres cancelar esta reserva?\n\n"
+            f"{booking.service.name}\n"
+            f"{booking.barber.name}\n"
+            f"{start_text}\n\n"
+            "Responde SI para confirmar o NO para volver."
+        )
+
+    if session.state == "CANCEL_CONFIRM":
+        lowered = text.lower()
+
+        if lowered == "no":
+            reset_to_menu(session)
+            return "Cancelación abortada. Escribe menú para volver."
+
+        if lowered != "si":
+            return "Responde SI para confirmar o NO para volver."
+
+        booking_id = data.get("cancel_booking_id")
+        telefono = normalize_phone(session.telefono)
+
+        booking = (
+            db.query(models.Booking)
+            .join(models.Cliente)
+            .filter(
+                models.Booking.id == booking_id,
+                models.Cliente.telefono == telefono,
+            )
+            .first()
+        )
+
+        if not booking:
+            reset_to_menu(session)
+            return "No he encontrado esa reserva."
+
+        if booking.cancelled_at is not None:
+            reset_to_menu(session)
+            return "Esa reserva ya estaba cancelada."
+
+        booking.cancelled_at = datetime.now(timezone.utc)
+        db.commit()
+
+        reset_to_menu(session)
+        return "Reserva cancelada correctamente."
+
+    reset_to_menu(session)
+    return MENU_TEXT
+
+
 def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
     telefono, body, message_id = extract_text_message(payload)
 
@@ -504,11 +705,10 @@ def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
             reply = MENU_TEXT
         elif session.state == "MENU":
             reply = process_menu_selection(db, session, text)
-        elif session.state == "LOOKUP_REF":
-            reply = process_lookup_flow(db, session, text)
-            reset_to_menu(session)
-        elif session.state == "CANCEL_REF":
-            reply = process_cancel_flow(db, session, text)
+        elif session.state == "LOOKUP_SELECT":
+            reply = process_lookup_select_flow(db, session, text)
+        elif session.state in ["CANCEL_SELECT", "CANCEL_CONFIRM"]:
+            reply = process_cancel_select_flow(db, session, text)
         elif session.state.startswith("BOOKING_"):
             reply = process_booking_flow(db, session, text)
         else:
@@ -521,14 +721,44 @@ def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
 
     if reply == MENU_TEXT:
         buttons = [
-            {"id": "BOOK", "title": "Reservar cita"},
-            {"id": "VIEW", "title": "Ver reserva"},
-            {"id": "CANCEL", "title": "Cancelar reserva"},
+            {"id": "BOOK", "title": "Reservar"},
+            {"id": "VIEW", "title": "Ver"},
+            {"id": "CANCEL", "title": "Cancelar"},
         ]
         send_whatsapp_buttons(
             telefono,
             "Bienvenido a SalonFlow 💈\n¿Qué deseas hacer?",
             buttons,
+        )
+    elif reply == "__SEND_SERVICE_LIST__":
+        services = get_active_services(db)
+        items = build_services_list(services)
+        send_whatsapp_list(
+            telefono,
+            "SalonFlow 💈",
+            "Selecciona un servicio",
+            "Ver servicios",
+            items,
+        )
+    elif reply == "__SEND_VIEW_BOOKINGS_LIST__":
+        bookings = get_active_bookings_for_phone(db, telefono)
+        items = build_bookings_list_items(bookings, "VIEWBOOKING")
+        send_whatsapp_list(
+            telefono,
+            "Tus reservas 💈",
+            "Selecciona una reserva para ver los detalles",
+            "Ver reservas",
+            items,
+        )
+    elif reply == "__SEND_CANCEL_BOOKINGS_LIST__":
+        bookings = get_active_bookings_for_phone(db, telefono)
+        items = build_bookings_list_items(bookings, "CANCELBOOKING")
+        send_whatsapp_list(
+            telefono,
+            "Cancelar reserva 💈",
+            "Selecciona la reserva que quieres cancelar",
+            "Ver reservas",
+            items,
         )
     else:
         send_text_message(telefono, reply)
