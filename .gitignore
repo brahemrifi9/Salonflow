@@ -1,0 +1,25 @@
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Variables de entorno (¡El escudo protector vital!)
+.env
+
+# Caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Pytest y tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs y bases de datos locales
+*.log
+*.sqlite3
+
+# SO
+.DS_Store
