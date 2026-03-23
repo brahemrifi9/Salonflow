@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
 
 from app.database import get_db
 from app import models
@@ -23,7 +24,7 @@ from app.schemas.public import (
     PublicBookingCancelRequest,
 )
 
-from app.auth import get_current_user
+from app.core.deps import get_current_user
 from app.core.deps import require_admin
 from app.domain.booking_rules import validate_and_compute_end_time_utc
 from app.utils.booking_ref import generate_booking_ref
@@ -200,7 +201,10 @@ def create_public_booking(
     "/public/bookings/{booking_ref}",
     response_model=PublicBookingLookup,
 )
+
+@limiter.limit("10/minute")
 def get_public_booking(
+    request: Request,
     booking_ref: str,
     db: Session = Depends(get_db),
 ):
@@ -218,6 +222,8 @@ def get_public_booking(
     cliente = booking.cliente
 
     status_value = "cancelled" if booking.cancelled_at else "confirmed"
+    telefono = getattr(cliente, "telefono", "")
+    masked_telefono = f"{'*' * max(0, len(telefono) - 3)}{telefono[-3:] if telefono else ''}"
 
     return PublicBookingLookup(
         booking_ref=booking.booking_ref,
@@ -237,7 +243,7 @@ def get_public_booking(
             "price_cents": getattr(service, "price_cents", None),
         },
         cliente_nombre=getattr(cliente, "nombre", None),
-        cliente_telefono=getattr(cliente, "telefono", ""),
+        cliente_telefono=masked_telefono,
         status=status_value,
     )
 
@@ -245,7 +251,10 @@ def get_public_booking(
 @router.patch(
     "/public/bookings/{booking_ref}/cancel",
 )
+
+@limiter.limit("5/minute")
 def cancel_public_booking(
+    request: Request,
     booking_ref: str,
     payload: PublicBookingCancelRequest,
     db: Session = Depends(get_db),
@@ -425,4 +434,15 @@ def cancel_booking(booking_id: int, db: Session = Depends(get_db)):
     dependencies=[Depends(require_admin)],
 )
 def admin_list_bookings(db: Session = Depends(get_db)):
-    return db.query(models.Booking).order_by(models.Booking.start_time.asc()).all()
+    bookings = (
+        db.query(models.Booking)
+        .options(
+            joinedload(models.Booking.cliente),
+            joinedload(models.Booking.barber),
+            joinedload(models.Booking.service),
+        )
+        .order_by(models.Booking.start_time.asc())
+        .all()
+    )
+
+    return bookings

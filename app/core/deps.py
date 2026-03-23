@@ -1,8 +1,11 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+import logging
+logger = logging.getLogger(__name__)
+
+from jose import JWTError, jwt
 from app.core.config import settings
 from app.database import get_db
 from app import models

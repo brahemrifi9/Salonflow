@@ -30,24 +30,24 @@ def upgrade():
         "UPDATE clientes SET telefono = 'UNKNOWN_' || id WHERE telefono IS NULL"
     )
 
-    # 3️⃣ Make telefono NOT NULL
+    # 3️ Make telefono NOT NULL
     op.alter_column("clientes", "telefono", nullable=False)
 
-    # 4️⃣ Add unique constraint
+    # 4️ Add unique constraint
     op.create_unique_constraint(
         "uq_clientes_telefono",
         "clientes",
         ["telefono"],
     )
 
-    # 5️⃣ Add index (optional but recommended)
+    # 5️ Add index (optional but recommended)
     op.create_index(
         "ix_clientes_telefono",
         "clientes",
         ["telefono"],
     )
 
-    # 6️⃣ Make email nullable (if currently NOT NULL)
+    # 6️ Make email nullable (if currently NOT NULL)
     op.alter_column("clientes", "email", nullable=True)
 
 

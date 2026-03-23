@@ -1,104 +1,157 @@
-Barber Booking System – System Modelling
+SalonFlow – System Modelling
 1. Architectural Overview
 
-The system follows a layered architecture:
+SalonFlow follows a layered service-oriented architecture designed to separate concerns and support scalability. The system exposes a REST API and integrates with WhatsApp through the Meta Cloud API.
 
-Client → FastAPI (API Layer) → Service Layer → Database (PostgreSQL)
+The architecture consists of the following layers:
 
-It is containerised using Docker Compose.
+Client Layer
 
-Architecture Diagram (Logical View)
-+--------------------+
-|    Client (HTTP)   |
-+--------------------+
-           |
-           v
-+--------------------+
-|      FastAPI       |
-|  (API Endpoints)   |
-+--------------------+
-           |
-           v
-+--------------------+
-|   Service Layer    |
-| (Business Logic)   |
-+--------------------+
-           |
-           v
-+--------------------+
-|   SQLAlchemy ORM   |
-+--------------------+
-           |
-           v
-+--------------------+
-|   PostgreSQL DB    |
-+--------------------+
+API/Webhook Layer
 
-Design Rationale:
+Service (Business Logic) Layer
 
-Separation of concerns improves maintainability.
+Persistence Layer
 
-Business logic isolated from routing layer.
+Database Layer
 
-Database accessed only through ORM.
+Logical Architecture Diagram
++---------------------------+
+|   Customer (WhatsApp)     |
++---------------------------+
+             |
+             v
++---------------------------+
+|   Meta WhatsApp Cloud API |
++---------------------------+
+             |
+             v
++---------------------------+
+| FastAPI Webhook / API     |
+| (Routing + Validation)    |
++---------------------------+
+             |
+             v
++---------------------------+
+|  Service Layer            |
+|  (Booking Engine, Logic)  |
++---------------------------+
+             |
+             v
++---------------------------+
+|  SQLAlchemy ORM           |
++---------------------------+
+             |
+             v
++---------------------------+
+|  PostgreSQL Database      |
++---------------------------+
+Design Rationale
 
-Allows future scalability (multiple barbers, frontend UI).
+The layered architecture provides several advantages:
+
+Separation of concerns between routing, logic, and persistence.
+
+Improved maintainability, allowing each component to evolve independently.
+
+Testability, as business logic is isolated from the HTTP layer.
+
+Scalability, enabling additional services or frontend applications in the future.
+
+The system supports both API-based interactions and WhatsApp conversational interactions using the same backend services.
 
 2. Deployment Architecture
 
-Docker Compose runs:
+The system is containerised using Docker Compose, ensuring reproducibility and environment isolation.
 
-api container
+Deployment Components
 
-postgres container
+Docker Compose manages the following containers:
 
-+-------------------+
-|   Docker Compose  |
-+-------------------+
-      |         |
-      v         v
-+----------+  +-----------+
-| FastAPI  |  | PostgreSQL|
-| Container|  | Container |
-+----------+  +-----------+
+API container (FastAPI backend)
 
-Rationale:
+Database container (PostgreSQL)
 
-Ensures portability
+Deployment Diagram
++---------------------------+
+|       Docker Compose      |
++---------------------------+
+          |        |
+          v        v
+   +------------+  +------------+
+   | FastAPI    |  | PostgreSQL |
+   | Container  |  | Container  |
+   +------------+  +------------+
+          |
+          v
++-----------------------------+
+| Meta WhatsApp Cloud API     |
++-----------------------------+
+Rationale
 
-No hardcoded dependencies
+Containerisation provides:
 
-Environment variables used for configuration
+Environment consistency
+
+Portability across machines
+
+Simple deployment
+
+Isolation of dependencies
+
+Configuration is handled using environment variables, ensuring that sensitive data such as API tokens are not hardcoded.
 
 3. Use Case Diagram
 
-Primary Actors:
+The system has two main actors:
+
+Actors
 
 Customer
 
-Admin
+interacts through WhatsApp
+
+Admin / Staff
+
+interacts through admin API or future dashboard
 
 Customer Use Cases
 
-Register
+View available services
 
-Login
+View barbers
 
-Create Booking
+Check availability
 
-Cancel Booking
+Create booking
 
-View Own Bookings
+View own bookings
 
-Admin Use Cases
+Cancel own booking
 
-View All Bookings
+Admin / Staff Use Cases
 
-4. Data Model (ER Overview)
+View all bookings
 
-Entities:
+Create booking manually
+
+Cancel booking
+
+Manage barbers
+
+Manage services
+
+4. Data Model (Entity Relationship Overview)
+
+The system uses a relational database to store core entities.
+
+Entities
 
 User
+
+Represents staff or administrators.
+
+Attributes:
 
 id
 
@@ -108,67 +161,196 @@ hashed_password
 
 is_admin
 
-Booking
+Cliente
+
+Represents customers interacting through WhatsApp.
+
+Attributes:
 
 id
 
-user_id (FK)
+telefono
 
-start_time
+created_at
+
+Barber
+
+Represents barbers working in the shop.
+
+Attributes:
+
+id
+
+name
+
+active
+
+Service
+
+Represents services offered.
+
+Attributes:
+
+id
+
+name
 
 duration_minutes
 
+price
+
+active
+
+Booking
+
+Represents scheduled appointments.
+
+Attributes:
+
+id
+
+cliente_id
+
+barber_id
+
+service_id
+
+start_time
+
+end_time
+
+booking_ref
+
 cancelled_at
 
-Relationship:
+WhatsappSession
 
-User (1) → (Many) Bookings
+Stores conversational state for the WhatsApp chatbot.
+
+Attributes:
+
+id
+
+telefono
+
+state
+
+session_data
+
+updated_at
+
+Relationships
+Cliente (1) ------ (Many) Booking
+Barber  (1) ------ (Many) Booking
+Service (1) ------ (Many) Booking
+
+Each booking belongs to:
+
+one client
+
+one barber
+
+one service
 
 5. Sequence Diagram – Booking Creation
-User → API: POST /bookings
-API → Service: validate request
-Service → DB: check for overlapping booking
-DB → Service: result
-Service → DB: insert booking
-DB → Service: success
-Service → API: booking created
-API → User: 201 Created
+Customer → WhatsApp
+WhatsApp → Meta Cloud API
+Meta → FastAPI Webhook
 
-If conflict:
+FastAPI → Booking Service
+Booking Service → Database (check availability)
+Database → Booking Service
 
-DB → Service: constraint violation
-Service → API: raise HTTP 409
-API → User: 409 Conflict
+Booking Service → Database (insert booking)
+Database → Booking Service
+
+Booking Service → WhatsApp API
+WhatsApp API → Customer
+
+If a conflict occurs
+
+Database → Booking Service: conflict detected
+Booking Service → API: raise conflict error
+API → Customer: booking not available
+
+The system prevents double booking through both:
+
+business logic checks
+
+database constraints
+
 6. Key Design Decisions
-Decision 1 – Single Barber MVP
+Decision 1 – WhatsApp-First Customer Interaction
 
-To reduce complexity and meet time constraints, the system supports one barber in MVP.
+The system uses WhatsApp as the primary user interface. This allows customers to interact with the system without installing an additional application.
 
-Scalability is preserved by designing booking model to allow future barber_id field.
+Benefits:
 
-Decision 2 – Database-Level Constraint
+Low barrier to entry
 
-Double booking prevention is enforced:
+Familiar interface
 
-Via uniqueness constraint or overlap check
+High adoption rate
 
-At database level to ensure reliability
+Decision 2 – UTC Time Storage
 
-This prevents race conditions.
+All booking times are stored in UTC.
 
-Decision 3 – Layered Architecture
+Local business rules (Madrid time zone) are applied in the application layer.
 
-Separating routes from business logic ensures:
+This avoids:
 
-Testability
+timezone inconsistencies
 
-Maintainability
+daylight saving errors
 
-Clear traceability from requirements to implementation
+Decision 3 – Database-Level Booking Protection
+
+Double bookings are prevented through:
+
+overlap validation in the service layer
+
+database constraints
+
+This guarantees data integrity even under concurrent requests.
+
+Decision 4 – Conversation State Machine
+
+The WhatsApp chatbot uses a session-based state machine stored in the database.
+
+This allows the system to track user progress through booking steps such as:
+
+selecting service
+
+selecting barber
+
+selecting date
+
+confirming booking
+
+Decision 5 – Booking Reference System
+
+Each booking receives a unique reference code.
+
+This allows customers to:
+
+identify bookings
+
+cancel bookings
+
+verify bookings
+
+without requiring account registration.
+
 
 7. Alignment with Requirements
-Requirement	Model Component	API Component
-FR1	User model	Auth endpoint
-FR3	Booking model	POST /bookings
-FR4	DB constraint	Booking service
-FR7	User.is_admin	Admin route
+
+| Requirement           | Model Component      | API Component            |
+| --------------------- | -------------------- | ------------------------ |
+| User authentication   | User model           | Auth endpoints           |
+| Service browsing      | Service model        | Public service endpoints |
+| Booking creation      | Booking model        | POST booking endpoint    |
+| Availability checking | Booking + Service    | Availability endpoint    |
+| Booking cancellation  | Booking.cancelled_at | Cancel endpoint          |
+| Admin control         | User.is_admin        | Admin routes             |
+

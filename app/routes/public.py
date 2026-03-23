@@ -1,7 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.exc import IntegrityError
+
 from sqlalchemy.orm import Session
 
 from app.core.db_errors import raise_http_for_integrity_error

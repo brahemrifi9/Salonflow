@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+
+import logging
+logger = logging.getLogger(__name__)
 
 from app.database import get_db
 from app import models
@@ -8,6 +11,7 @@ from app.schemas.users import UserCreate, UserOut, Token
 from app.core.deps import get_current_user
 from app.core.config import settings
 from app.core.security import hash_password, verify_password, create_access_token
+from app.core.rate_limit import limiter
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -47,7 +51,9 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("5/minute")
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -57,7 +63,14 @@ def login(
         models.User.email == form_data.username
     ).first()
 
+    client_ip = request.client.host if request.client else "unknown"
+
     if not user or not verify_password(form_data.password, user.hashed_password):
+        logger.warning(
+            "Failed login attempt | email=%s | ip=%s",
+            form_data.username,
+            client_ip,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
@@ -69,6 +82,13 @@ def login(
         algorithm=settings.ALGORITHM,
         expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
         extra_claims={"is_admin": user.is_admin},
+    )
+
+    logger.info(
+        "Successful login | user_id=%s | email=%s | ip=%s",
+        user.id,
+        user.email,
+        client_ip,
     )
 
     return Token(access_token=access_token)
