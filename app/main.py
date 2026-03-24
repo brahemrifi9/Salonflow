@@ -2,30 +2,47 @@ import os
 
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.rate_limit import limiter
-from app.routes import whatsapp
-from app.routes import auth, admin, bookings, clientes, availability, public
-from app.routes import barbers, services
+from app.routes import (
+    whatsapp,
+    auth,
+    admin,
+    bookings,
+    clientes,
+    availability,
+    public,
+    barbers,
+    services,
+    health,
+)
 from app import database
-from app.routes import health
 
+# Create app
 app = FastAPI(title="SalonFlow MVP")
 
-# Attach limiter to app state
+# Rate limiting
 app.state.limiter = limiter
-
-# Register exception handler for 429
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# ------------------------
+# CORS CONFIG
+# ------------------------
+
 allowed_origins = os.getenv("CORS_ORIGINS", "")
+
 origins = [o.strip() for o in allowed_origins.split(",") if o.strip()]
 
-# If CORS_ORIGINS is empty, default to no origins (secure).
+# Fallback (optional but useful for safety/debug)
+if not origins:
+    origins = [
+        "http://localhost:5173",
+        "https://admin.salonflowapp.com",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -34,7 +51,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
+# ------------------------
+# ROUTERS
+# ------------------------
+
 app.include_router(bookings.router)
 app.include_router(clientes.router)
 app.include_router(auth.router)
@@ -46,6 +66,9 @@ app.include_router(public.router)
 app.include_router(health.router)
 app.include_router(whatsapp.router)
 
+# ------------------------
+# BASIC ROUTES
+# ------------------------
 
 @app.get("/")
 def read_root():
