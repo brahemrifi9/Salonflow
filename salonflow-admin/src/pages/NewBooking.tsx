@@ -71,7 +71,7 @@ export default function NewBooking() {
 
     const fetchSlots = async () => {
       try {
-        const response = await api.get<AvailabilityResponse>("/public/availability/", {
+        const response = await api.get<AvailabilityResponse>("/public/availability", {
           params: {
             barber_id: barberId,
             service_id: serviceId,
