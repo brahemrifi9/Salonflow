@@ -4,10 +4,19 @@ import { getClientes } from "../api/clientes"
 import { getAdminBarbers } from "../api/barbers"
 import { getServices } from "../api/services"
 import { createBooking } from "../api/bookings"
+import api from "../api/client"
 import type { Cliente } from "../types/cliente"
 import type { Barber } from "../types/barber"
 import type { Service } from "../types/service"
 import Layout from "../components/Layout"
+
+type AvailabilitySlot = {
+  start_time_madrid: string
+}
+
+type AvailabilityResponse = {
+  slots: AvailabilitySlot[]
+}
 
 export default function NewBooking() {
   const navigate = useNavigate()
@@ -62,17 +71,15 @@ export default function NewBooking() {
 
     const fetchSlots = async () => {
       try {
-        const res = await fetch(
-          `http://localhost:8000/api/v1/public/availability?barber_id=${barberId}&service_id=${serviceId}&date=${date}`
-        )
+        const response = await api.get<AvailabilityResponse>("/public/availability", {
+          params: {
+            barber_id: barberId,
+            service_id: serviceId,
+            date,
+          },
+        })
 
-        if (!res.ok) {
-          throw new Error("Failed to fetch availability")
-        }
-
-        const data = await res.json()
-
-        const slotTimes = data.slots.map((slot: any) =>
+        const slotTimes = response.data.slots.map((slot) =>
           new Date(slot.start_time_madrid).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",

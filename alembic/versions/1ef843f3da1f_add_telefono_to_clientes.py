@@ -19,13 +19,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    # 1️⃣ Add telefono column as nullable first
+    # 1️ Add telefono column as nullable first
     op.add_column(
         "clientes",
         sa.Column("telefono", sa.String(length=32), nullable=True),
     )
 
-    # 2️⃣ Backfill existing rows (so NOT NULL won't fail)
+    # 2️ Backfill existing rows (so NOT NULL won't fail)
     op.execute(
         "UPDATE clientes SET telefono = 'UNKNOWN_' || id WHERE telefono IS NULL"
     )
