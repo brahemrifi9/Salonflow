@@ -12,6 +12,18 @@ This project is deployed in production and built with a full backend, infrastruc
 
 ---
 
+## 📸 Screenshots
+
+### 📲 WhatsApp Booking Flow
+![WhatsApp Flow](./whatsapp-flow-1.png)
+![WhatsApp Flow](./whatsapp-flow-2.png)
+
+### 🖥️ Admin Dashboard
+![Dashboard](./dashboard.png)
+
+### 📅 Booking Management
+![Bookings](./bookings.png)
+
 ## ⚙️ Core Features
 
 ### 📅 Booking System
