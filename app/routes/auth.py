@@ -25,13 +25,31 @@ def _validate_bcrypt_password(password: str) -> None:
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(payload: UserCreate, db: Session = Depends(get_db)):
+def register(payload: UserCreate, business_id: int, db: Session = Depends(get_db)):
+    """
+    Register a new user for a specific business.
+    business_id is passed as a query parameter: POST /api/v1/auth/register?business_id=1
+
+    NOTE: In a production multi-tenant SaaS, you would protect this endpoint
+    with an invite token or require the caller to be an existing admin.
+    For now it is open but requires a valid business_id.
+    """
     _validate_bcrypt_password(payload.password)
+
+    # Verify the business exists and is active
+    business = db.query(models.Business).filter(
+        models.Business.id == business_id,
+        models.Business.is_active == True,  # noqa: E712
+    ).first()
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found or inactive.",
+        )
 
     existing = db.query(models.User).filter(
         models.User.email == payload.email
     ).first()
-
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -42,6 +60,7 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
         email=payload.email,
         hashed_password=hash_password(payload.password),
         is_admin=False,
+        business_id=business_id,
     )
 
     db.add(user)
@@ -85,9 +104,10 @@ def login(
     )
 
     logger.info(
-        "Successful login | user_id=%s | email=%s | ip=%s",
+        "Successful login | user_id=%s | email=%s | business_id=%s | ip=%s",
         user.id,
         user.email,
+        user.business_id,
         client_ip,
     )
 
@@ -95,5 +115,5 @@ def login(
 
 
 @router.get("/me", response_model=UserOut)
-def me(current_user=Depends(get_current_user)):
+def me(current_user: models.User = Depends(get_current_user)):
     return current_user
