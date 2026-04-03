@@ -24,6 +24,8 @@ Currently live.
 ### 📅 Booking Management
 <img src="https://github.com/user-attachments/assets/92e61d62-1ca3-4b7e-9cb7-cd67484d599d" width="700"/>
 
+---
+
 ## 🏢 Multi-Tenant Architecture
 
 Each business is fully isolated at the database level:
@@ -38,6 +40,7 @@ Each business is fully isolated at the database level:
 ## ⚙️ Core Features
 
 ### 📅 Booking System
+
 - Business hours: 11:00 – 21:30
 - 15-minute time slots
 - Lunch break blocking (15:00–16:00)
@@ -47,81 +50,48 @@ Each business is fully isolated at the database level:
 - Automatic client creation
 - Overlap protection at database level
 
-**Booking System**
-- 15-minute time slots with configurable business hours
-- Lunch break blocking
-- Real-time availability calculation with overlap protection at DB level
-- Booking reference codes
-- Cancellation via WhatsApp and admin panel
+---
 
-**WhatsApp Integration**
+### 📲 WhatsApp Integration (Key Feature)
+
 - Full booking flow via WhatsApp Cloud API (select barber → service → time slot)
 - Webhook handling with signature verification
 - Multilingual support (ES/EN)
 - Permanent access token management
 
-**Admin Panel**
+---
+
+### 🖥️ Admin Panel
+
 - JWT authentication per business
 - Dashboard, booking management, manual booking creation
 - Deployed on Vercel
 
 ---
 
-### 📲 WhatsApp Integration (Key Feature)
-- Integrated with WhatsApp Cloud API
-- Fully functional booking flow:
-  - Select barber
-  - Select service
-  - Choose time slot
-- Features:
-  - Book appointments
-  - Cancel bookings
-  - View booking details
-- Webhook handling with verification
-- Permanent access token configured
-
----
-
-### 🖥️ Admin Panel
-- Deployed on Vercel
-- Features:
-  - Login (JWT authentication)
-  - Dashboard
-  - Manual booking creation
-  - Booking management
-
----
-
 ## 🏗️ Tech Stack
 
-### Backend
-- FastAPI
-- PostgreSQL
-- SQLAlchemy
-- Alembic (database migrations)
+## 🛠️ Tech Stack
 
-### Frontend
-- React
-- TypeScript
-- Vite
-- Vercel (deployment)
-
-### Infrastructure
-- VPS (Hetzner)
-- Docker & Docker Compose
-- Nginx (reverse proxy)
-- HTTPS (Certbot / Let's Encrypt)
-- Cloudflare (proxy + SSL)
+| Layer | Tech |
+|---|---|
+| Backend | FastAPI, Python, SQLAlchemy ORM |
+| Database | PostgreSQL 15, Alembic migrations |
+| Frontend | React, TypeScript, Vite |
+| Infrastructure | Hetzner VPS, Docker, Nginx |
+| DNS / Proxy | Cloudflare |
+| Deployment | Backend on VPS (uvicorn), Frontend on Vercel |
+| Integration | WhatsApp Cloud API |
 
 ---
 
 ## 🔐 Security
 
-- UFW firewall enabled
-- Fail2Ban protection
+- UFW firewall + Fail2Ban
 - Database not publicly exposed
-- HTTPS enforced
-- Secure proxy headers configuration
+- HTTPS enforced (Certbot / Let's Encrypt)
+- Secure proxy headers via Nginx
+- JWT-based admin authentication
 
 ---
 
@@ -145,15 +115,16 @@ A barbershop can currently:
 
 ## 🧠 What this project demonstrates
 
-- Full-stack system design
-- Real-world backend logic (not CRUD-only)
-- Production deployment & infrastructure
-- Third-party API integration (WhatsApp)
-- Security and system hardening
-- Business-oriented software development
+- Multi-tenant SaaS architecture (data isolation, shared infra)
+- Real-world backend design — not CRUD-only
+- Third-party API integration (WhatsApp Cloud API, webhooks)
+- Production deployment & infrastructure management
+- Database schema design and migration management (Alembic)
+- Security hardening on a live VPS
+- Full-stack ownership: backend → infra → frontend → integrations
 
 ---
 
 ## 📌 Status
 
-Active MVP — currently being tested with real users and preparing for first client deployments.
+**Live in production** — first client actively using the system. Second client onboarding in progress.
