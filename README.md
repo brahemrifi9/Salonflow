@@ -1,14 +1,14 @@
 # 💈 SalonFlow
 
-Production-ready barbershop booking system with WhatsApp integration.
+Multi-tenant SaaS platform for barbershops — WhatsApp booking + admin dashboard, built for real business use.
 
 ---
 
 ## 🚀 Overview
 
-SalonFlow is a real-world booking system designed for barbershops, allowing clients to book appointments directly via WhatsApp while providing businesses with a simple admin interface to manage bookings.
+SalonFlow is a production SaaS platform that lets multiple barbershop businesses run independently on shared infrastructure. Each business has its own isolated data, WhatsApp booking flow, and admin panel.
 
-This project is deployed in production and built with a full backend, infrastructure, and messaging integration stack.
+Currently live.
 
 ---
 
@@ -24,6 +24,17 @@ This project is deployed in production and built with a full backend, infrastruc
 ### 📅 Booking Management
 <img src="https://github.com/user-attachments/assets/92e61d62-1ca3-4b7e-9cb7-cd67484d599d" width="700"/>
 
+## 🏢 Multi-Tenant Architecture
+
+Each business is fully isolated at the database level:
+
+- Every tenant table carries a `business_id` foreign key (bookings, barbers, services, clients)
+- All API endpoints are scoped to a single business via query param
+- Migrations managed with Alembic — schema changes apply across all tenants cleanly
+- New businesses can be onboarded without touching existing data
+
+---
+
 ## ⚙️ Core Features
 
 ### 📅 Booking System
@@ -35,6 +46,24 @@ This project is deployed in production and built with a full backend, infrastruc
 - Cancellation system (WhatsApp & admin)
 - Automatic client creation
 - Overlap protection at database level
+
+**Booking System**
+- 15-minute time slots with configurable business hours
+- Lunch break blocking
+- Real-time availability calculation with overlap protection at DB level
+- Booking reference codes
+- Cancellation via WhatsApp and admin panel
+
+**WhatsApp Integration**
+- Full booking flow via WhatsApp Cloud API (select barber → service → time slot)
+- Webhook handling with signature verification
+- Multilingual support (ES/EN)
+- Permanent access token management
+
+**Admin Panel**
+- JWT authentication per business
+- Dashboard, booking management, manual booking creation
+- Deployed on Vercel
 
 ---
 
