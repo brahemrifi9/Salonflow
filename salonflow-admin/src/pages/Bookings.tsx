@@ -20,6 +20,7 @@ export default function Bookings() {
   const [success, setSuccess] = useState("")
   const [showCancelled, setShowCancelled] = useState(true)
   const [todayOnly, setTodayOnly] = useState(false)
+  const [hidePast, setHidePast] = useState(true)
   const [selectedBarberId, setSelectedBarberId] = useState("")
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
@@ -65,10 +66,7 @@ export default function Bookings() {
       setBookings((prev) =>
         prev.map((booking) =>
           booking.id === bookingId
-            ? {
-                ...booking,
-                cancelled_at: new Date().toISOString(),
-              }
+            ? { ...booking, cancelled_at: new Date().toISOString() }
             : booking
         )
       )
@@ -94,6 +92,12 @@ export default function Bookings() {
       result = result.filter((booking) => !booking.cancelled_at)
     }
 
+    if (hidePast) {
+      result = result.filter((booking) =>
+        dayjs(booking.start_time).isAfter(dayjs())
+      )
+    }
+
     if (todayOnly) {
       result = result.filter((booking) =>
         dayjs(booking.start_time).isSame(dayjs(), "day")
@@ -107,7 +111,7 @@ export default function Bookings() {
     }
 
     return result
-  }, [bookings, showCancelled, todayOnly, selectedBarberId])
+  }, [bookings, showCancelled, hidePast, todayOnly, selectedBarberId])
 
   return (
     <Layout
@@ -146,6 +150,15 @@ export default function Bookings() {
             onChange={(e) => setTodayOnly(e.target.checked)}
           />
           Today only
+        </label>
+
+        <label style={labelStyle}>
+          <input
+            type="checkbox"
+            checked={hidePast}
+            onChange={(e) => setHidePast(e.target.checked)}
+          />
+          Hide past
         </label>
 
         <label style={labelStyle}>
@@ -213,6 +226,7 @@ export default function Bookings() {
               {filteredBookings.map((booking) => {
                 const isCancelled = !!booking.cancelled_at
                 const isCancelling = actionLoadingId === booking.id
+                const isPast = dayjs(booking.start_time).isBefore(dayjs())
 
                 return (
                   <tr
@@ -244,7 +258,7 @@ export default function Bookings() {
                       </span>
                     </td>
                     <td style={tdStyle}>
-                      {isCancelled ? (
+                      {isCancelled || isPast ? (
                         <span style={{ color: "#9ca3af", fontSize: 13 }}>
                           No actions
                         </span>
