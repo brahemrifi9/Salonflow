@@ -69,7 +69,6 @@ Each business is fully isolated at the database level:
 
 ---
 
-## 🏗️ Tech Stack
 
 ## 🛠️ Tech Stack
 
