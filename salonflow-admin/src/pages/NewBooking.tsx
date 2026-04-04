@@ -9,6 +9,7 @@ import type { Cliente } from "../types/cliente"
 import type { Barber } from "../types/barber"
 import type { Service } from "../types/service"
 import Layout from "../components/Layout"
+import { useAuth } from "../hooks/useAuth"
 
 type AvailabilitySlot = {
   start_time_madrid: string
@@ -21,6 +22,7 @@ type AvailabilityResponse = {
 export default function NewBooking() {
   const navigate = useNavigate()
 
+  const { getBusinessId } = useAuth()
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [barbers, setBarbers] = useState<Barber[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -73,6 +75,7 @@ export default function NewBooking() {
       try {
         const response = await api.get<AvailabilityResponse>("/public/availability", {
           params: {
+            business_id: getBusinessId(),
             barber_id: barberId,
             service_id: serviceId,
             date,

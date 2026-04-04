@@ -35,4 +35,5 @@ export type AdminUser = {
   id: number
   email: string
   is_admin: boolean
+  business_id: number
 }
