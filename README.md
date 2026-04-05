@@ -1,4 +1,4 @@
-# 💈 SalonFlow
+# SalonFlow
 
 > Multi-tenant SaaS platform for barbershops — WhatsApp booking + admin dashboard, built for real business use.
 
