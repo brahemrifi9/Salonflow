@@ -362,6 +362,23 @@ def get_public_availability(
         e = b.end_time if b.end_time.tzinfo else b.end_time.replace(tzinfo=timezone.utc)
         busy.append((s.astimezone(UTC), e.astimezone(UTC)))
 
+    barber_blocks = (
+        db.query(models.BarberBlock)
+        .filter(
+            models.BarberBlock.barber_id == barber_id,
+            models.BarberBlock.business_id == business_id,
+            models.BarberBlock.date == date,
+        )
+        .all()
+    )
+    blocks: list[tuple[datetime, datetime]] = [
+        (
+            datetime.combine(date, blk.start_time, tzinfo=shop_tz).astimezone(UTC),
+            datetime.combine(date, blk.end_time, tzinfo=shop_tz).astimezone(UTC),
+        )
+        for blk in barber_blocks
+    ]
+
     open_local = datetime.combine(date, business.open_time, tzinfo=shop_tz)
     close_local = datetime.combine(date, business.close_time, tzinfo=shop_tz)
     lunch_start = datetime.combine(date, business.lunch_start, tzinfo=shop_tz)
@@ -385,7 +402,10 @@ def get_public_availability(
         start_u = start_m.astimezone(UTC)
         end_u = end_m.astimezone(UTC)
 
-        conflict = any((start_u < be) and (end_u > bs) for (bs, be) in busy)
+        conflict = (
+            any((start_u < be) and (end_u > bs) for (bs, be) in busy)
+            or any((start_u < blk_e) and (end_u > blk_s) for (blk_s, blk_e) in blocks)
+        )
         if not conflict:
             slots.append(
                 AvailabilitySlot(

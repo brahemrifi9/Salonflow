@@ -16,6 +16,7 @@ from app.routes import (
     availability,
     public,
     barbers,
+    barber_blocks,
     services,
     health,
 )
@@ -60,6 +61,7 @@ app.include_router(clientes.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(barbers.router)
+app.include_router(barber_blocks.router)
 app.include_router(services.router)
 app.include_router(availability.router)
 app.include_router(public.router)

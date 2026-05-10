@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, time, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Date, Integer, String, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy import DateTime, Text, Time
 
@@ -41,6 +41,7 @@ class Business(Base):
     clientes = relationship("Cliente", back_populates="business")
     bookings = relationship("Booking", back_populates="business")
     whatsapp_sessions = relationship("WhatsappSession", back_populates="business")
+    barber_blocks = relationship("BarberBlock", back_populates="business")
 
 
 class Cliente(Base):
@@ -84,6 +85,7 @@ class Barber(Base):
 
     business = relationship("Business", back_populates="barbers")
     bookings = relationship("Booking", back_populates="barber")
+    blocks = relationship("BarberBlock", back_populates="barber")
 
 
 class Service(Base):
@@ -131,6 +133,26 @@ class Booking(Base):
     cliente = relationship("Cliente", back_populates="bookings")
     barber = relationship("Barber", back_populates="bookings")
     service = relationship("Service", back_populates="bookings")
+
+
+class BarberBlock(Base):
+    __tablename__ = "barber_blocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False, index=True)
+    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    reason = Column(String(256), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    business = relationship("Business", back_populates="barber_blocks")
+    barber = relationship("Barber", back_populates="blocks")
 
 
 class WhatsappSession(Base):

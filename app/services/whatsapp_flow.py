@@ -351,9 +351,29 @@ def get_available_slots_for_date(
     )
     busy = [(b.start_time, b.end_time) for b in existing]
 
+    barber_blocks = (
+        db.query(models.BarberBlock)
+        .filter(
+            models.BarberBlock.barber_id == barber_id,
+            models.BarberBlock.business_id == business.id,
+            models.BarberBlock.date == target_date,
+        )
+        .all()
+    )
+    blocks = [
+        (
+            datetime.combine(blk.date, blk.start_time, tzinfo=shop_tz),
+            datetime.combine(blk.date, blk.end_time, tzinfo=shop_tz),
+        )
+        for blk in barber_blocks
+    ]
+
     def overlaps(s: datetime, e: datetime) -> bool:
         for b_s, b_e in busy:
             if s < b_e and e > b_s:
+                return True
+        for blk_s, blk_e in blocks:
+            if s < blk_e and e > blk_s:
                 return True
         return False
 
