@@ -61,6 +61,7 @@ def create_booking(
     current_user: models.User = Depends(get_current_user),
 ):
     business_id = current_user.business_id
+    business = _get_business_or_404(db, business_id)
 
     cliente = db.query(models.Cliente).filter(
         models.Cliente.id == booking.cliente_id,
@@ -88,6 +89,7 @@ def create_booking(
         service.duration_minutes,
         require_client_utc=True,
         enforce_slot_step=True,
+        business=business,
     )
 
     new_booking = models.Booking(
@@ -128,7 +130,7 @@ def create_public_booking(
     business_id: int = Query(..., gt=0),
     db: Session = Depends(get_db),
 ):
-    _get_business_or_404(db, business_id)
+    business = _get_business_or_404(db, business_id)
 
     cliente = db.query(models.Cliente).filter(
         models.Cliente.telefono == booking.telefono,
@@ -179,6 +181,7 @@ def create_public_booking(
         service.duration_minutes,
         require_client_utc=True,
         enforce_slot_step=True,
+        business=business,
     )
 
     new_booking = models.Booking(
@@ -311,7 +314,7 @@ def get_public_availability(
     date: date_type = Query(...),
     db: Session = Depends(get_db),
 ):
-    _get_business_or_404(db, business_id)
+    business = _get_business_or_404(db, business_id)
 
     barber = db.query(models.Barber).filter(
         models.Barber.id == barber_id,
@@ -359,10 +362,10 @@ def get_public_availability(
         e = b.end_time if b.end_time.tzinfo else b.end_time.replace(tzinfo=timezone.utc)
         busy.append((s.astimezone(UTC), e.astimezone(UTC)))
 
-    open_madrid = datetime.combine(date, time(11, 0), tzinfo=MADRID)
-    close_madrid = datetime.combine(date, time(21, 30), tzinfo=MADRID)
-    lunch_start = datetime.combine(date, time(15, 0), tzinfo=MADRID)
-    lunch_end = datetime.combine(date, time(16, 0), tzinfo=MADRID)
+    open_madrid = datetime.combine(date, business.open_time, tzinfo=MADRID)
+    close_madrid = datetime.combine(date, business.close_time, tzinfo=MADRID)
+    lunch_start = datetime.combine(date, business.lunch_start, tzinfo=MADRID)
+    lunch_end = datetime.combine(date, business.lunch_end, tzinfo=MADRID)
 
     last_start = close_madrid - duration
     if last_start < open_madrid:

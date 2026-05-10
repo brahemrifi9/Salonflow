@@ -1,9 +1,9 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
-from sqlalchemy import DateTime, Text
+from sqlalchemy import DateTime, Text, Time
 
 from .database import Base
 
@@ -17,6 +17,11 @@ class Business(Base):
     language = Column(String(8), nullable=False, default="es")
     currency = Column(String(8), nullable=False, default="EUR")
     timezone = Column(String(64), nullable=False, default="Europe/Madrid")
+
+    open_time = Column(Time, nullable=False, default=time(11, 0))
+    close_time = Column(Time, nullable=False, default=time(21, 30))
+    lunch_start = Column(Time, nullable=False, default=time(15, 0))
+    lunch_end = Column(Time, nullable=False, default=time(16, 0))
 
     # The Meta WhatsApp phone number ID assigned to this business.
     # Used to route incoming webhooks to the correct business.
