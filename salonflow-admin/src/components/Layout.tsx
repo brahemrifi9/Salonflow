@@ -54,6 +54,7 @@ export default function Layout({ title, subtitle, actions, children }: Props) {
               <NavItem to="/">Dashboard</NavItem>
               <NavItem to="/bookings">Bookings</NavItem>
               <NavItem to="/bookings/new">New Booking</NavItem>
+              <NavItem to="/barbers/blocks">Schedule Blocks</NavItem>
             </nav>
           </div>
 

@@ -3,6 +3,7 @@ import Login from "./pages/Login"
 import Dashboard from "./pages/Dashboard"
 import Bookings from "./pages/Bookings"
 import NewBooking from "./pages/NewBooking"
+import BarberBlocks from "./pages/BarberBlocks"
 import ProtectedRoute from "./components/ProtectedRoute"
 
 function App() {
@@ -34,6 +35,15 @@ function App() {
           element={
             <ProtectedRoute>
               <NewBooking />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/barbers/blocks"
+          element={
+            <ProtectedRoute>
+              <BarberBlocks />
             </ProtectedRoute>
           }
         />
