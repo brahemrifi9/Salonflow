@@ -8,8 +8,6 @@ from fastapi import HTTPException, status
 from app import models
 
 
-MADRID_TZ = ZoneInfo("Europe/Madrid")
-
 _SLOT_STEP_MINUTES = 15
 
 
@@ -55,15 +53,16 @@ def validate_and_compute_end_time_utc(
 
     end_utc = start_utc + timedelta(minutes=duration_minutes)
 
-    start_local = start_utc.astimezone(MADRID_TZ)
-    end_local = end_utc.astimezone(MADRID_TZ)
+    shop_tz = ZoneInfo(business.timezone)
+    start_local = start_utc.astimezone(shop_tz)
+    end_local = end_utc.astimezone(shop_tz)
 
     if end_local <= start_local:
         _raise_400("La reserva no es válida.")
 
     day = start_local.date()
-    open_dt = datetime.combine(day, business.open_time, tzinfo=MADRID_TZ)
-    close_dt = datetime.combine(day, business.close_time, tzinfo=MADRID_TZ)
+    open_dt = datetime.combine(day, business.open_time, tzinfo=shop_tz)
+    close_dt = datetime.combine(day, business.close_time, tzinfo=shop_tz)
 
     if not (open_dt <= start_local and end_local <= close_dt):
         _raise_400(
@@ -71,8 +70,8 @@ def validate_and_compute_end_time_utc(
             f"({business.open_time.strftime('%H:%M')}–{business.close_time.strftime('%H:%M')})."
         )
 
-    lunch_start_dt = datetime.combine(day, business.lunch_start, tzinfo=MADRID_TZ)
-    lunch_end_dt = datetime.combine(day, business.lunch_end, tzinfo=MADRID_TZ)
+    lunch_start_dt = datetime.combine(day, business.lunch_start, tzinfo=shop_tz)
+    lunch_end_dt = datetime.combine(day, business.lunch_end, tzinfo=shop_tz)
 
     if start_local < lunch_end_dt and end_local > lunch_start_dt:
         _raise_400(

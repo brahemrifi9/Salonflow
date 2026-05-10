@@ -36,7 +36,6 @@ from app.services.meta_whatsapp import (
 
 logger = logging.getLogger(__name__)
 
-MADRID_TZ = ZoneInfo("Europe/Madrid")
 
 _SLOT_STEP = timedelta(minutes=15)
 
@@ -158,7 +157,7 @@ def normalize_phone(telefono: str) -> str:
     return telefono.strip().replace(" ", "")
 
 
-def parse_madrid_datetime_to_utc(date_str: str, time_str: str) -> datetime:
+def parse_local_datetime_to_utc(date_str: str, time_str: str, tz: ZoneInfo) -> datetime:
     try:
         local_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
     except ValueError:
@@ -166,8 +165,7 @@ def parse_madrid_datetime_to_utc(date_str: str, time_str: str) -> datetime:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Fecha u hora inválida.",
         )
-    madrid_dt = local_dt.replace(tzinfo=MADRID_TZ)
-    return madrid_dt.astimezone(timezone.utc)
+    return local_dt.replace(tzinfo=tz).astimezone(timezone.utc)
 
 
 # ─────────────────────────────────────────────
@@ -250,15 +248,15 @@ def build_barbers_menu(barbers: list[models.Barber], lang: str = "es") -> tuple[
     return "\n".join(lines), option_map
 
 
-def format_booking_row_title(booking: models.Booking) -> str:
-    start_madrid = booking.start_time.astimezone(MADRID_TZ)
-    return f"{booking.service.name} · {start_madrid.strftime('%d/%m %H:%M')}"[:24]
+def format_booking_row_title(booking: models.Booking, tz: ZoneInfo) -> str:
+    start_local = booking.start_time.astimezone(tz)
+    return f"{booking.service.name} · {start_local.strftime('%d/%m %H:%M')}"[:24]
 
 
-def format_booking_row_description(booking: models.Booking, lang: str = "es") -> str:
-    start_madrid = booking.start_time.astimezone(MADRID_TZ)
-    day = day_long(lang, start_madrid.weekday())
-    time_str = start_madrid.strftime("%H:%M")
+def format_booking_row_description(booking: models.Booking, tz: ZoneInfo, lang: str = "es") -> str:
+    start_local = booking.start_time.astimezone(tz)
+    day = day_long(lang, start_local.weekday())
+    time_str = start_local.strftime("%H:%M")
     return f"{booking.barber.name} · {day} {time_str}"[:72]
 
 
@@ -266,20 +264,21 @@ def build_bookings_list_items(
     bookings: list[models.Booking],
     prefix: str,
     lang: str = "es",
+    tz: ZoneInfo = ZoneInfo("Europe/Madrid"),
 ) -> list[dict]:
     return [
         {
             "id": f"{prefix}_{booking.id}",
-            "title": format_booking_row_title(booking),
-            "description": format_booking_row_description(booking, lang),
+            "title": format_booking_row_title(booking, tz),
+            "description": format_booking_row_description(booking, tz, lang),
         }
         for booking in bookings
     ]
 
 
-def build_date_list_items(page: int = 1, lang: str = "es") -> list[dict]:
-    """Next 18 days from today (Madrid) as WhatsApp list items, 9 per page."""
-    today = datetime.now(MADRID_TZ).date()
+def build_date_list_items(page: int = 1, lang: str = "es", tz: ZoneInfo = ZoneInfo("Europe/Madrid")) -> list[dict]:
+    """Next 18 days from today (shop local time) as WhatsApp list items, 9 per page."""
+    today = datetime.now(tz).date()
     all_items = []
     for i in range(18):
         d = today + timedelta(days=i)
@@ -329,10 +328,11 @@ def get_available_slots_for_date(
         return []
 
     duration = timedelta(minutes=service.duration_minutes)
-    day_start = datetime.combine(target_date, business.open_time, tzinfo=MADRID_TZ)
-    day_end = datetime.combine(target_date, business.close_time, tzinfo=MADRID_TZ)
-    break_start = datetime.combine(target_date, business.lunch_start, tzinfo=MADRID_TZ)
-    break_end = datetime.combine(target_date, business.lunch_end, tzinfo=MADRID_TZ)
+    shop_tz = ZoneInfo(business.timezone)
+    day_start = datetime.combine(target_date, business.open_time, tzinfo=shop_tz)
+    day_end = datetime.combine(target_date, business.close_time, tzinfo=shop_tz)
+    break_start = datetime.combine(target_date, business.lunch_start, tzinfo=shop_tz)
+    break_end = datetime.combine(target_date, business.lunch_end, tzinfo=shop_tz)
 
     day_start_utc = day_start.astimezone(timezone.utc)
     day_end_utc = day_end.astimezone(timezone.utc)
@@ -460,9 +460,9 @@ def get_saved_client_nombre(db: Session, telefono: str, business_id: int) -> str
     return None
 
 
-def format_booking_details(booking: models.Booking, lang: str = "es") -> str:
-    start_madrid = booking.start_time.astimezone(MADRID_TZ)
-    end_madrid = booking.end_time.astimezone(MADRID_TZ)
+def format_booking_details(booking: models.Booking, tz: ZoneInfo, lang: str = "es") -> str:
+    start_madrid = booking.start_time.astimezone(tz)
+    end_madrid = booking.end_time.astimezone(tz)
     status_key = "booking_status_cancelled" if booking.cancelled_at else "booking_status_confirmed"
     return (
         f"{t(lang, 'booking_details_label')} {booking.booking_ref}\n"
@@ -477,9 +477,9 @@ def format_booking_details(booking: models.Booking, lang: str = "es") -> str:
     )
 
 
-def format_human_booking_datetime(dt: datetime, lang: str = "es") -> str:
-    madrid_dt = dt.astimezone(MADRID_TZ)
-    now_madrid = datetime.now(MADRID_TZ).date()
+def format_human_booking_datetime(dt: datetime, tz: ZoneInfo, lang: str = "es") -> str:
+    madrid_dt = dt.astimezone(tz)
+    now_madrid = datetime.now(tz).date()
     target_date = madrid_dt.date()
     if target_date == now_madrid:
         day_label = t(lang, "today")
@@ -560,7 +560,7 @@ def create_booking_from_session_data(
     if not business:
         raise HTTPException(status_code=404, detail="Business not found.")
 
-    requested_start_utc = parse_madrid_datetime_to_utc(date_str, time_str)
+    requested_start_utc = parse_local_datetime_to_utc(date_str, time_str, ZoneInfo(business.timezone))
 
     start_utc, end_utc = validate_and_compute_end_time_utc(
         requested_start_utc,
@@ -644,9 +644,11 @@ def process_lookup_select_flow(
     session: models.WhatsappSession,
     incoming_text: str,
     lang: str = "es",
+    business: models.Business | None = None,
 ) -> str:
     text = incoming_text.strip()
     business_id = session.business_id
+    shop_tz = ZoneInfo(business.timezone) if business else ZoneInfo("Europe/Madrid")
 
     booking_id = None
     if text.startswith("VIEWBOOKING_"):
@@ -675,7 +677,7 @@ def process_lookup_select_flow(
         return t(lang, "booking_not_found")
 
     reset_to_menu(session)
-    return format_booking_details(booking, lang)
+    return format_booking_details(booking, shop_tz, lang)
 
 
 def process_cancel_select_flow(
@@ -683,9 +685,11 @@ def process_cancel_select_flow(
     session: models.WhatsappSession,
     incoming_text: str,
     lang: str = "es",
+    business: models.Business | None = None,
 ) -> str:
     data = session.get_data()
     text = incoming_text.strip()
+    shop_tz = ZoneInfo(business.timezone) if business else ZoneInfo("Europe/Madrid")
     business_id = session.business_id
 
     if session.state == "CANCEL_SELECT":
@@ -719,7 +723,7 @@ def process_cancel_select_flow(
         session.set_data(data)
         session.state = "CANCEL_CONFIRM"
 
-        start_text = format_human_booking_datetime(booking.start_time, lang)
+        start_text = format_human_booking_datetime(booking.start_time, shop_tz, lang)
         return t(lang, "cancel_confirm_prompt",
                  service=booking.service.name,
                  barber=booking.barber.name,
@@ -772,10 +776,12 @@ def process_booking_flow(
     session: models.WhatsappSession,
     incoming_text: str,
     lang: str = "es",
+    business: models.Business | None = None,
 ) -> str:
     data = session.get_data()
     text = incoming_text.strip()
     business_id = session.business_id
+    shop_tz = ZoneInfo(business.timezone) if business else ZoneInfo("Europe/Madrid")
 
     if session.state == "BOOKING_SERVICE":
         service_id = None
@@ -857,7 +863,7 @@ def process_booking_flow(
             logger.debug("BOOKING_DATE: no valid date_str, re-sending date list")
             return "__SEND_DATE_LIST_PAGE_1__"
 
-        if datetime.strptime(date_str, "%Y-%m-%d").date() < datetime.now(MADRID_TZ).date():
+        if datetime.strptime(date_str, "%Y-%m-%d").date() < datetime.now(shop_tz).date():
             logger.debug("BOOKING_DATE: date %s is in the past", date_str)
             return "__SEND_DATE_LIST_PAST__"
 
@@ -947,7 +953,7 @@ def process_booking_flow(
             reset_to_menu(session)
             return t(lang, "booking_unexpected_error")
 
-        start_madrid = booking.start_time.astimezone(MADRID_TZ)
+        start_madrid = booking.start_time.astimezone(shop_tz)
         reset_to_menu(session)
         return t(lang, "booking_confirmed",
                  ref=booking.booking_ref,
@@ -1001,11 +1007,11 @@ def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
         elif session.state == "MENU":
             reply = process_menu_selection(db, session, text, lang)
         elif session.state == "LOOKUP_SELECT":
-            reply = process_lookup_select_flow(db, session, text, lang)
+            reply = process_lookup_select_flow(db, session, text, lang, business)
         elif session.state in ["CANCEL_SELECT", "CANCEL_CONFIRM"]:
-            reply = process_cancel_select_flow(db, session, text, lang)
+            reply = process_cancel_select_flow(db, session, text, lang, business)
         elif session.state.startswith("BOOKING_"):
-            reply = process_booking_flow(db, session, text, lang)
+            reply = process_booking_flow(db, session, text, lang, business)
         else:
             reset_to_menu(session)
             reply = MENU_TEXT
@@ -1047,7 +1053,7 @@ def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
         )
     elif reply == "__SEND_VIEW_BOOKINGS_LIST__":
         bookings = get_active_bookings_for_phone(db, telefono, business.id)
-        items = build_bookings_list_items(bookings, "VIEWBOOKING", lang)
+        items = build_bookings_list_items(bookings, "VIEWBOOKING", lang, ZoneInfo(business.timezone))
         send_whatsapp_list(
             telefono,
             t(lang, "view_bookings_header"),
@@ -1057,7 +1063,7 @@ def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
         )
     elif reply == "__SEND_CANCEL_BOOKINGS_LIST__":
         bookings = get_active_bookings_for_phone(db, telefono, business.id)
-        items = build_bookings_list_items(bookings, "CANCELBOOKING", lang)
+        items = build_bookings_list_items(bookings, "CANCELBOOKING", lang, ZoneInfo(business.timezone))
         send_whatsapp_list(
             telefono,
             t(lang, "cancel_bookings_header"),
@@ -1069,7 +1075,7 @@ def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
         if reply == "__SEND_DATE_LIST_PAST__":
             send_text_message(telefono, t(lang, "date_in_past"))
         page = 2 if reply == "__SEND_DATE_LIST_PAGE_2__" else 1
-        items = build_date_list_items(page=page, lang=lang)
+        items = build_date_list_items(page=page, lang=lang, tz=ZoneInfo(business.timezone))
         send_whatsapp_list(
             telefono,
             t(lang, "dates_header"),
@@ -1110,7 +1116,7 @@ def process_incoming_whatsapp_event(db: Session, payload: dict) -> None:
                 session.set_data(data)
                 db.add(session)
                 db.commit()
-                items = build_date_list_items(page=1, lang=lang)
+                items = build_date_list_items(page=1, lang=lang, tz=ZoneInfo(business.timezone))
                 send_whatsapp_list(
                     telefono,
                     t(lang, "dates_header"),

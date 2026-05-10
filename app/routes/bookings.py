@@ -30,7 +30,6 @@ from app.core.rate_limit import limiter
 
 router = APIRouter(prefix="/api/v1", tags=["Bookings"])
 
-MADRID = ZoneInfo("Europe/Madrid")
 UTC = ZoneInfo("UTC")
 
 
@@ -338,11 +337,12 @@ def get_public_availability(
 
     duration = timedelta(minutes=int(duration_minutes))
     step = timedelta(minutes=15)
+    shop_tz = ZoneInfo(business.timezone)
 
-    day_start_madrid = datetime.combine(date, time(0, 0), tzinfo=MADRID)
-    day_end_madrid = day_start_madrid + timedelta(days=1)
-    day_start_utc = day_start_madrid.astimezone(UTC)
-    day_end_utc = day_end_madrid.astimezone(UTC)
+    day_start_local = datetime.combine(date, time(0, 0), tzinfo=shop_tz)
+    day_end_local = day_start_local + timedelta(days=1)
+    day_start_utc = day_start_local.astimezone(UTC)
+    day_end_utc = day_end_local.astimezone(UTC)
 
     existing = (
         db.query(models.Booking)
@@ -362,17 +362,17 @@ def get_public_availability(
         e = b.end_time if b.end_time.tzinfo else b.end_time.replace(tzinfo=timezone.utc)
         busy.append((s.astimezone(UTC), e.astimezone(UTC)))
 
-    open_madrid = datetime.combine(date, business.open_time, tzinfo=MADRID)
-    close_madrid = datetime.combine(date, business.close_time, tzinfo=MADRID)
-    lunch_start = datetime.combine(date, business.lunch_start, tzinfo=MADRID)
-    lunch_end = datetime.combine(date, business.lunch_end, tzinfo=MADRID)
+    open_local = datetime.combine(date, business.open_time, tzinfo=shop_tz)
+    close_local = datetime.combine(date, business.close_time, tzinfo=shop_tz)
+    lunch_start = datetime.combine(date, business.lunch_start, tzinfo=shop_tz)
+    lunch_end = datetime.combine(date, business.lunch_end, tzinfo=shop_tz)
 
-    last_start = close_madrid - duration
-    if last_start < open_madrid:
+    last_start = close_local - duration
+    if last_start < open_local:
         return AvailabilityOut(barber_id=barber_id, service_id=service_id, date=date, slots=[])
 
     slots: list[AvailabilitySlot] = []
-    t = open_madrid
+    t = open_local
 
     while t <= last_start:
         start_m = t
@@ -391,8 +391,8 @@ def get_public_availability(
                 AvailabilitySlot(
                     start_time_utc=start_u,
                     end_time_utc=end_u,
-                    start_time_madrid=start_m.astimezone(MADRID),
-                    end_time_madrid=end_m.astimezone(MADRID),
+                    start_time_madrid=start_m.astimezone(shop_tz),
+                    end_time_madrid=end_m.astimezone(shop_tz),
                 )
             )
 

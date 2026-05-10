@@ -139,3 +139,56 @@ def send_whatsapp_list(
     }
 
     return _post_whatsapp_payload(payload)
+
+
+def send_whatsapp_list_sections(
+    to_phone: str,
+    header: str,
+    body_text: str,
+    button_text: str,
+    sections: list[dict],
+) -> dict:
+    """Like send_whatsapp_list but accepts multiple named sections."""
+    _WHATSAPP_MAX_ROWS = 10
+    formatted = []
+    remaining = _WHATSAPP_MAX_ROWS
+    for section in sections:
+        if remaining <= 0:
+            break
+        rows = []
+        for item in section["rows"][:remaining]:
+            row = {
+                "id": item["id"][:200],
+                "title": item["title"][:24],
+            }
+            if item.get("description"):
+                row["description"] = item["description"][:72]
+            rows.append(row)
+        remaining -= len(rows)
+        if rows:
+            formatted.append({
+                "title": section.get("title", "")[:24],
+                "rows": rows,
+            })
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {
+                "type": "text",
+                "text": header[:60],
+            },
+            "body": {
+                "text": body_text[:1024],
+            },
+            "action": {
+                "button": button_text[:20],
+                "sections": formatted,
+            },
+        },
+    }
+
+    return _post_whatsapp_payload(payload)
