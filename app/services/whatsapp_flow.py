@@ -342,7 +342,7 @@ def get_available_slots_for_date(
         db.query(models.Booking)
         .filter(
             models.Booking.barber_id == barber_id,
-            models.Booking.business_id == business_id,
+            models.Booking.business_id == business.id,
             models.Booking.cancelled_at.is_(None),
             models.Booking.start_time < day_end_utc,
             models.Booking.end_time > day_start_utc,
